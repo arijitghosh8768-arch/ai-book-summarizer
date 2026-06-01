@@ -18,7 +18,9 @@ export default function Home() {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [bookList, setBookList] = useState<Book[]>([]);
   const [loadingList, setLoadingList] = useState(true);
-  const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
+  const [apiBase, setApiBase] = useState(
+    process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+  );
 
   // Fetch previously uploaded documents
   const fetchBooks = async () => {
