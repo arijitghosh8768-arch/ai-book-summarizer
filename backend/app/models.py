@@ -53,3 +53,11 @@ class ChatHistory(Base):
     role = Column(String)             # user, assistant
     content = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Page(Base):
+    __tablename__ = "pages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_id = Column(Integer, ForeignKey("books.id"))
+    page_number = Column(Integer)
+    text = Column(Text)

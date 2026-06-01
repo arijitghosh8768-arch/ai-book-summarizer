@@ -39,6 +39,41 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def read_root():
     return {"message": "Welcome to AI Study Companion API. Go to /docs for Swagger API documentation."}
 
+def process_book_background(file_path: str, book_id: int, total_pages: int):
+    """
+    Background worker:
+    1. Extract page-by-page text and save to the database.
+    2. Run RAG indexing.
+    """
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        existing_pages = db.query(models.Page).filter(models.Page.book_id == book_id).count()
+        if existing_pages == 0:
+            print(f"Background extraction started for book {book_id}...")
+            for page_num in range(1, total_pages + 1):
+                try:
+                    text = document_proc.extract_page_text(file_path, page_num)
+                    db_page = models.Page(
+                        book_id=book_id,
+                        page_number=page_num,
+                        text=text
+                    )
+                    db.add(db_page)
+                except Exception as e:
+                    print(f"Error extracting page {page_num} for book {book_id}: {e}")
+            db.commit()
+            print(f"Background extraction completed for book {book_id}!")
+    except Exception as e:
+        print(f"Error in background page extraction for book {book_id}: {e}")
+    finally:
+        db.close()
+
+    try:
+        rag_engine.index_book(file_path, book_id, total_pages)
+    except Exception as e:
+        print(f"Error in RAG indexing for book {book_id}: {e}")
+
 @app.post("/api/upload", response_model=schemas.BookResponse)
 def upload_file(
     background_tasks: BackgroundTasks,
@@ -47,7 +82,7 @@ def upload_file(
 ):
     """
     Upload a book/document (PDF), extract its metadata and save it to the DB.
-    Also, triggers RAG background indexing.
+    Also, triggers RAG background indexing and page-by-page extraction.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported currently.")
@@ -82,12 +117,13 @@ def upload_file(
         language=meta["language"],
         file_path=file_path
     )
+    db_book.total_pages = meta["total_pages"] # Ensure pages set correctly
     db.add(db_book)
     db.commit()
     db.refresh(db_book)
     
-    # Run RAG indexing in the background
-    background_tasks.add_task(rag_engine.index_book, file_path, db_book.id, db_book.total_pages)
+    # Run page extraction and RAG indexing in the background
+    background_tasks.add_task(process_book_background, file_path, db_book.id, db_book.total_pages)
     
     return db_book
 
@@ -142,14 +178,26 @@ async def process_book_range(
 
     # Extract text from specific range
     extract_start = time.time()
-    try:
-        extracted_text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to extract page range: {str(e)}")
+    db_pages = db.query(models.Page).filter(
+        models.Page.book_id == book_id,
+        models.Page.page_number >= req.start_page,
+        models.Page.page_number <= req.end_page
+    ).order_by(models.Page.page_number.asc()).all()
+
+    expected_count = req.end_page - req.start_page + 1
+    if len(db_pages) == expected_count:
+        print("Loading pages from Database...")
+        extracted_text = "\n\n".join(f"--- PAGE {p.page_number} ---\n{p.text}" for p in db_pages)
+    else:
+        print("Database page cache miss/incomplete. Falling back to PDF extraction...")
+        try:
+            extracted_text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to extract page range: {str(e)}")
         
     if not extracted_text.strip():
         raise HTTPException(status_code=400, detail="The selected page range contains no extractable text.")
-    print("PDF Extraction Time:", time.time() - extract_start)
+    print("Page Retrieval Time:", time.time() - extract_start)
         
     # Format fields that could be parsed as lists from JSON responses
     def format_field(val) -> str:
@@ -224,11 +272,22 @@ async def generate_book_flashcards(
         Actionable Insights: {summary.actionable_insights}
         """
     else:
-        print("No cached summary found. Extracting text from PDF...")
-        try:
-            text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        print("No cached summary found. Loading pages from Database...")
+        db_pages = db.query(models.Page).filter(
+            models.Page.book_id == book_id,
+            models.Page.page_number >= req.start_page,
+            models.Page.page_number <= req.end_page
+        ).order_by(models.Page.page_number.asc()).all()
+
+        expected_count = req.end_page - req.start_page + 1
+        if len(db_pages) == expected_count:
+            text = "\n\n".join(f"--- PAGE {p.page_number} ---\n{p.text}" for p in db_pages)
+        else:
+            print("Database page cache miss/incomplete. Falling back to PDF extraction...")
+            try:
+                text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
         
     cards = await ai_engine.generate_flashcards(text)
     
@@ -292,11 +351,22 @@ async def generate_book_quiz(
         Actionable Insights: {summary.actionable_insights}
         """
     else:
-        print("No cached summary found. Extracting text from PDF...")
-        try:
-            text = document_proc.extract_text_range(book.file_path, page_req.start_page, page_req.end_page)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        print("No cached summary found. Loading pages from Database...")
+        db_pages = db.query(models.Page).filter(
+            models.Page.book_id == book_id,
+            models.Page.page_number >= page_req.start_page,
+            models.Page.page_number <= page_req.end_page
+        ).order_by(models.Page.page_number.asc()).all()
+
+        expected_count = page_req.end_page - page_req.start_page + 1
+        if len(db_pages) == expected_count:
+            text = "\n\n".join(f"--- PAGE {p.page_number} ---\n{p.text}" for p in db_pages)
+        else:
+            print("Database page cache miss/incomplete. Falling back to PDF extraction...")
+            try:
+                text = document_proc.extract_text_range(book.file_path, page_req.start_page, page_req.end_page)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
         
     questions = await ai_engine.generate_quiz(text, difficulty=quiz_req.difficulty, num_questions=quiz_req.num_questions)
     
