@@ -2,7 +2,11 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instance"))
+if os.environ.get("VERCEL") == "1":
+    DATABASE_DIR = "/tmp"
+else:
+    DATABASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instance"))
+
 os.makedirs(DATABASE_DIR, exist_ok=True)
 DATABASE_URL = f"sqlite:///{os.path.join(DATABASE_DIR, 'study_companion.db')}"
 

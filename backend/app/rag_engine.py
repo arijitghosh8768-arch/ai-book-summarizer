@@ -20,6 +20,11 @@ if api_key:
 EMBEDDING_MODEL = "nvidia/embeddings-nv-embed-qa-4"
 CHAT_MODEL = "meta/llama-3.1-8b-instruct"
 
+if os.environ.get("VERCEL") == "1":
+    VECTOR_DIR = "/tmp/vectors"
+else:
+    VECTOR_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instance", "vectors"))
+
 # Chunk and embed files
 from concurrent.futures import ThreadPoolExecutor
 
@@ -67,9 +72,8 @@ def index_book(file_path: str, book_id: int, total_pages: int) -> dict:
     Extract pages, chunk them, embed in parallel batches, and store as a JSON vector file.
     Returns status info.
     """
-    vector_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instance", "vectors"))
-    os.makedirs(vector_dir, exist_ok=True)
-    index_path = os.path.join(vector_dir, f"book_{book_id}.json")
+    os.makedirs(VECTOR_DIR, exist_ok=True)
+    index_path = os.path.join(VECTOR_DIR, f"book_{book_id}.json")
     
     if os.path.exists(index_path):
         return {"status": "already_indexed", "path": index_path}
@@ -135,8 +139,7 @@ def retrieve_context(query: str, book_id: int, top_k: int = 3) -> str:
     """
     Retrieve top K matching page text chunks from the book's vector index.
     """
-    vector_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instance", "vectors"))
-    index_path = os.path.join(vector_dir, f"book_{book_id}.json")
+    index_path = os.path.join(VECTOR_DIR, f"book_{book_id}.json")
     
     if not os.path.exists(index_path):
         return ""
