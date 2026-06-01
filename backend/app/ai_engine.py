@@ -1,16 +1,17 @@
 import os
 import json
-from openai import OpenAI
+import asyncio
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 # Load env variables
 load_dotenv()
 
-# Initialize OpenAI client with NVIDIA endpoint
+# Initialize AsyncOpenAI client with NVIDIA endpoint
 api_key = os.getenv("NVIDIA_API_KEY")
-client = None
+aclient = None
 if api_key:
-    client = OpenAI(
+    aclient = AsyncOpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key=api_key
     )
@@ -19,11 +20,55 @@ else:
 
 DEFAULT_MODEL = "meta/llama-3.1-8b-instruct"
 
-def generate_summary(text: str) -> dict:
+def chunk_text(text: str, max_words: int = 1500) -> list[str]:
     """
-    Summarize a text block using Llama 3.1 on NVIDIA NIM.
+    Split the text into chunks of at most max_words words.
     """
-    if not client:
+    words = text.split()
+    chunks = []
+    current_chunk = []
+    current_word_count = 0
+    for word in words:
+        current_chunk.append(word)
+        current_word_count += 1
+        if current_word_count >= max_words:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = []
+            current_word_count = 0
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
+
+async def summarize_chunk(chunk: str) -> str:
+    """
+    Map Phase: Summarize a single chunk of text.
+    """
+    if not aclient:
+        return "Error: NVIDIA API Key is not set."
+
+    prompt = f"""
+    You are a reading assistant. Summarize the following section of a book or document.
+    Provide a concise, detailed bullet-point summary capturing all key points, facts, and definitions.
+    Do not extrapolate or assume anything not directly mentioned in the text.
+
+    Text:
+    \"\"\"{chunk}\"\"\"
+    """
+    try:
+        completion = await aclient.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return completion.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error in summarize_chunk: {e}")
+        return f"[Error summarizing chunk: {str(e)}]"
+
+async def generate_summary(text: str) -> dict:
+    """
+    Summarize a text block using Llama 3.1 on NVIDIA NIM using Map-Reduce.
+    """
+    if not aclient:
         return {
             "summary": "Error: NVIDIA API Key is not set.",
             "main_idea": "Please set NVIDIA_API_KEY in the .env file.",
@@ -32,8 +77,16 @@ def generate_summary(text: str) -> dict:
             "actionable_insights": "- Actionable Insight"
         }
 
+    chunks = chunk_text(text, max_words=1500)
+    
+    # Map Phase: process chunks in parallel
+    tasks = [summarize_chunk(chunk) for chunk in chunks]
+    chunk_summaries = await asyncio.gather(*tasks)
+    combined_summary_text = "\n\n".join(chunk_summaries)
+
+    # Reduce Phase: Synthesize combined summaries
     prompt = f"""
-    Analyze the following text from a book or document.
+    Analyze the following combined text summaries from a book or document.
     Provide your response in a structured format containing exactly these five sections:
     1. Summary (A comprehensive overview of the text)
     2. Main Idea (The primary takeaway or argument)
@@ -45,11 +98,11 @@ def generate_summary(text: str) -> dict:
     Return the response as a JSON object with keys: "summary", "main_idea", "key_concepts", "definitions", "actionable_insights".
     Use clean Markdown formatting within the values of the JSON.
 
-    Text:
-    \"\"\"{text}\"\"\"
+    Combined Summaries:
+    \"\"\"{combined_summary_text}\"\"\"
     """
     try:
-        completion = client.chat.completions.create(
+        completion = await aclient.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
@@ -57,9 +110,9 @@ def generate_summary(text: str) -> dict:
         return json.loads(completion.choices[0].message.content)
     except Exception as e:
         print(f"Error in generate_summary: {e}")
-        # Try a regex or direct string parse if json_object format fails or is unsupported
+        # Try fallback raw JSON request
         try:
-            completion = client.chat.completions.create(
+            completion = await aclient.chat.completions.create(
                 model=DEFAULT_MODEL,
                 messages=[{"role": "user", "content": prompt + "\nRespond with raw JSON only."}]
             )
@@ -73,11 +126,11 @@ def generate_summary(text: str) -> dict:
                 "actionable_insights": "- Insight 1"
             }
 
-def generate_flashcards(text: str) -> list:
+async def generate_flashcards(text: str) -> list:
     """
     Generate a list of flashcards using Llama 3.1 on NVIDIA NIM.
     """
-    if not client:
+    if not aclient:
         return [{"front": "Error", "back": "NVIDIA_API_KEY is not set"}]
 
     prompt = f"""
@@ -93,7 +146,7 @@ def generate_flashcards(text: str) -> list:
     \"\"\"{text}\"\"\"
     """
     try:
-        completion = client.chat.completions.create(
+        completion = await aclient.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
@@ -110,11 +163,11 @@ def generate_flashcards(text: str) -> list:
             {"front": "What is the primary topic of the text?", "back": "Please check your NVIDIA API configuration."}
         ]
 
-def generate_quiz(text: str, difficulty: str = "Medium", num_questions: int = 5) -> list:
+async def generate_quiz(text: str, difficulty: str = "Medium", num_questions: int = 5) -> list:
     """
     Generate a quiz using Llama 3.1 on NVIDIA NIM.
     """
-    if not client:
+    if not aclient:
         return []
 
     prompt = f"""
@@ -135,7 +188,7 @@ def generate_quiz(text: str, difficulty: str = "Medium", num_questions: int = 5)
     \"\"\"{text}\"\"\"
     """
     try:
-        completion = client.chat.completions.create(
+        completion = await aclient.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
@@ -150,11 +203,11 @@ def generate_quiz(text: str, difficulty: str = "Medium", num_questions: int = 5)
         print(f"Error in generate_quiz: {e}")
         return []
 
-def translate_content(text: str, target_language: str) -> str:
+async def translate_content(text: str, target_language: str) -> str:
     """
     Translate content to target language using Llama 3.1 on NVIDIA NIM.
     """
-    if not client or not target_language or target_language.lower() == "english":
+    if not aclient or not target_language or target_language.lower() == "english":
         return text
         
     prompt = f"""
@@ -166,7 +219,7 @@ def translate_content(text: str, target_language: str) -> str:
     \"\"\"{text}\"\"\"
     """
     try:
-        completion = client.chat.completions.create(
+        completion = await aclient.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[{"role": "user", "content": prompt}]
         )

@@ -105,7 +105,7 @@ def get_book(book_id: int, db: Session = Depends(get_db)):
     return book
 
 @app.post("/api/books/{book_id}/process", response_model=schemas.SummaryResponse)
-def process_book_range(
+async def process_book_range(
     book_id: int,
     req: schemas.SummaryRequest,
     db: Session = Depends(get_db)
@@ -117,7 +117,21 @@ def process_book_range(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
         
+    # Check if a summary for this range already exists
+    existing_summary = db.query(models.Summary).filter(
+        models.Summary.book_id == book_id,
+        models.Summary.start_page == req.start_page,
+        models.Summary.end_page == req.end_page
+    ).first()
+    if existing_summary:
+        print("Database Cache Hit for Summary!")
+        return existing_summary
+
+    import time
+    start = time.time()
+
     # Extract text from specific range
+    extract_start = time.time()
     try:
         extracted_text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
     except Exception as e:
@@ -125,6 +139,7 @@ def process_book_range(
         
     if not extracted_text.strip():
         raise HTTPException(status_code=400, detail="The selected page range contains no extractable text.")
+    print("PDF Extraction Time:", time.time() - extract_start)
         
     # Format fields that could be parsed as lists from JSON responses
     def format_field(val) -> str:
@@ -132,8 +147,11 @@ def process_book_range(
             return "\n".join(f"- {item}" if not str(item).strip().startswith("-") and not str(item).strip().startswith("*") else str(item) for item in val)
         return str(val) if val is not None else ""
 
-    # Generate summary with Gemini
-    summary_data = ai_engine.generate_summary(extracted_text)
+    # Generate summary with Llama 3.1
+    ai_start = time.time()
+    summary_data = await ai_engine.generate_summary(extracted_text)
+    print("AI Summary Time:", time.time() - ai_start)
+    print("Total Processing Time:", time.time() - start)
     
     # Save to database
     db_summary = models.Summary(
@@ -147,7 +165,6 @@ def process_book_range(
         actionable_insights=format_field(summary_data.get("actionable_insights", ""))
     )
     
-    # Check if a summary for this range already exists and delete or just add new
     db.add(db_summary)
     db.commit()
     db.refresh(db_summary)
@@ -162,7 +179,7 @@ def get_book_summaries(book_id: int, db: Session = Depends(get_db)):
     return db.query(models.Summary).filter(models.Summary.book_id == book_id).all()
 
 @app.post("/api/books/{book_id}/flashcards", response_model=List[schemas.FlashcardResponse])
-def generate_book_flashcards(
+async def generate_book_flashcards(
     book_id: int,
     req: schemas.SummaryRequest,
     db: Session = Depends(get_db)
@@ -174,12 +191,30 @@ def generate_book_flashcards(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
         
-    try:
-        text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # Attempt to pull cached summary
+    summary = db.query(models.Summary).filter(
+        models.Summary.book_id == book_id,
+        models.Summary.start_page == req.start_page,
+        models.Summary.end_page == req.end_page
+    ).first()
+    
+    if summary:
+        print("Generating flashcards using cached summary...")
+        text = f"""
+        Summary: {summary.summary_text}
+        Main Idea: {summary.main_idea}
+        Key Concepts: {summary.key_concepts}
+        Definitions: {summary.definitions}
+        Actionable Insights: {summary.actionable_insights}
+        """
+    else:
+        print("No cached summary found. Extracting text from PDF...")
+        try:
+            text = document_proc.extract_text_range(book.file_path, req.start_page, req.end_page)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
-    cards = ai_engine.generate_flashcards(text)
+    cards = await ai_engine.generate_flashcards(text)
     
     db_cards = []
     for card in cards:
@@ -205,7 +240,7 @@ def get_book_flashcards_history(book_id: int, db: Session = Depends(get_db)):
     return db.query(models.Flashcard).filter(models.Flashcard.book_id == book_id).all()
 
 @app.post("/api/books/{book_id}/quiz", response_model=schemas.QuizResponse)
-def generate_book_quiz(
+async def generate_book_quiz(
     book_id: int,
     page_req: schemas.SummaryRequest,
     quiz_req: schemas.QuizRequest,
@@ -218,12 +253,30 @@ def generate_book_quiz(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
         
-    try:
-        text = document_proc.extract_text_range(book.file_path, page_req.start_page, page_req.end_page)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # Attempt to pull cached summary
+    summary = db.query(models.Summary).filter(
+        models.Summary.book_id == book_id,
+        models.Summary.start_page == page_req.start_page,
+        models.Summary.end_page == page_req.end_page
+    ).first()
+    
+    if summary:
+        print("Generating quiz using cached summary...")
+        text = f"""
+        Summary: {summary.summary_text}
+        Main Idea: {summary.main_idea}
+        Key Concepts: {summary.key_concepts}
+        Definitions: {summary.definitions}
+        Actionable Insights: {summary.actionable_insights}
+        """
+    else:
+        print("No cached summary found. Extracting text from PDF...")
+        try:
+            text = document_proc.extract_text_range(book.file_path, page_req.start_page, page_req.end_page)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
-    questions = ai_engine.generate_quiz(text, difficulty=quiz_req.difficulty, num_questions=quiz_req.num_questions)
+    questions = await ai_engine.generate_quiz(text, difficulty=quiz_req.difficulty, num_questions=quiz_req.num_questions)
     
     db_quiz = models.Quiz(
         book_id=book_id,
@@ -280,7 +333,7 @@ def get_chat_history(book_id: int, db: Session = Depends(get_db)):
     return [{"role": msg.role, "content": msg.content, "created_at": msg.created_at} for msg in messages]
 
 @app.post("/api/translate")
-def translate_text(req: dict):
+async def translate_text(req: dict):
     """
     On-demand translation of content.
     """
@@ -288,7 +341,7 @@ def translate_text(req: dict):
     target_lang = req.get("target_language", "English")
     if not text:
         raise HTTPException(status_code=400, detail="Missing text for translation.")
-    translated = ai_engine.translate_content(text, target_lang)
+    translated = await ai_engine.translate_content(text, target_lang)
     return {"translated": translated}
 
 class DocxExportRequest(schemas.BaseModel):
