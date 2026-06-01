@@ -120,6 +120,12 @@ async def process_book_range(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
         
+    # Validate page range
+    if req.start_page < 1 or req.end_page > book.total_pages or req.start_page > req.end_page:
+        raise HTTPException(status_code=400, detail=f"Invalid page range. Book has {book.total_pages} pages.")
+    if req.end_page - req.start_page + 1 > 50:
+        raise HTTPException(status_code=400, detail="Maximum range for a single request is 50 pages. Please select a smaller page range.")
+        
     # Check if a summary for this range already exists
     existing_summary = db.query(models.Summary).filter(
         models.Summary.book_id == book_id,
@@ -194,6 +200,12 @@ async def generate_book_flashcards(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
         
+    # Validate page range
+    if req.start_page < 1 or req.end_page > book.total_pages or req.start_page > req.end_page:
+        raise HTTPException(status_code=400, detail=f"Invalid page range. Book has {book.total_pages} pages.")
+    if req.end_page - req.start_page + 1 > 50:
+        raise HTTPException(status_code=400, detail="Maximum range for a single request is 50 pages. Please select a smaller page range.")
+        
     # Attempt to pull cached summary
     summary = db.query(models.Summary).filter(
         models.Summary.book_id == book_id,
@@ -255,6 +267,12 @@ async def generate_book_quiz(
     book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
+        
+    # Validate page range
+    if page_req.start_page < 1 or page_req.end_page > book.total_pages or page_req.start_page > page_req.end_page:
+        raise HTTPException(status_code=400, detail=f"Invalid page range. Book has {book.total_pages} pages.")
+    if page_req.end_page - page_req.start_page + 1 > 50:
+        raise HTTPException(status_code=400, detail="Maximum range for a single request is 50 pages. Please select a smaller page range.")
         
     # Attempt to pull cached summary
     summary = db.query(models.Summary).filter(
