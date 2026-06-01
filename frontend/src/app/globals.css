@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+:root {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --card: #18181b;
+  --card-foreground: #f4f4f5;
+  --popover: #09090b;
+  --popover-foreground: #f4f4f5;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --secondary: #27272a;
+  --secondary-foreground: #f4f4f5;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #f4f4f5;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #d8b4fe;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #121214;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* 3D Flip Card classes for Flashcards */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Custom Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(24, 24, 27, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-light {
+  background: rgba(24, 24, 27, 0.45);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Animated gradient text */
+.text-gradient-purple {
+  background: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-teal {
+  background: linear-gradient(135deg, #2dd4bf 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
