@@ -19,7 +19,11 @@ export default function Home() {
   const [bookList, setBookList] = useState<Book[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [apiBase, setApiBase] = useState(
-    process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_API_URL !== undefined
+      ? process.env.NEXT_PUBLIC_API_URL
+      : (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1")
+        ? ""
+        : "http://127.0.0.1:8000"
   );
 
   // Fetch previously uploaded documents
